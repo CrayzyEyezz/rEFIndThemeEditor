@@ -30,3 +30,7 @@ Usage:
 ================================
 
 Also there will likely be some descrepencies such as people will likely have different install locations of rEFInd depending on how you installed it so youll need to go into the conf and change the directories. if this project gets more attention ill find a way to automate that but for now as of me and some friends being the only ones using it im just gonna leave it be.
+
+
+Discord: https://discord.gg/UsDPckUATe
+feel free to find and share themes here
