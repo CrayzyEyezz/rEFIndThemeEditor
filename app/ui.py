@@ -1,13 +1,15 @@
 import os
+import shutil
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QScrollArea, QFrame, QLineEdit,
     QCheckBox, QComboBox, QSpinBox, QListWidget, QAbstractItemView,
     QMessageBox, QInputDialog, QFileDialog, QStackedWidget, QGroupBox,
-    QFormLayout, QSplitter, QSizePolicy, QTextEdit, QListWidgetItem
+    QFormLayout, QSplitter, QSizePolicy, QTextEdit, QListWidgetItem,
+    QGraphicsOpacityEffect, QGraphicsDropShadowEffect
 )
-from PySide6.QtCore import Qt, QSize, Signal, QPoint
-from PySide6.QtGui import QPixmap, QFont, QPalette, QColor, QIcon
+from PySide6.QtCore import Qt, QSize, Signal, QPoint, QPropertyAnimation, QEasingCurve, QRect, QTimer, Property, QParallelAnimationGroup
+from PySide6.QtGui import QPixmap, QFont, QPalette, QColor, QIcon, QPainter, QPainterPath, QLinearGradient, QTransform
 
 from app.theme_manager import (
     ALL_OPTIONS, get_sections, scan_themes, create_theme,
@@ -24,19 +26,27 @@ class ThemeCard(QFrame):
         self.theme_name = theme_name
         self.setFrameShape(QFrame.StyledPanel)
         self.setCursor(Qt.PointingHandCursor)
-        self.setStyleSheet("""
-            ThemeCard {
-                background: #2a2a2a;
-                border: 2px solid #3a3a3a;
-                border-radius: 8px;
-            }
-            ThemeCard:hover {
-                border: 2px solid #0078d7;
-                background: #333;
-            }
-        """)
         self.setMinimumSize(200, 180)
         self.setMaximumSize(260, 220)
+        self.setAttribute(Qt.WA_Hover, True)
+
+        self._hover_progress = 0.0
+        self._press_progress = 0.0
+        self._card_pixmap = QPixmap()
+
+        self._hover_anim = QPropertyAnimation(self, b"hover_progress")
+        self._hover_anim.setDuration(180)
+        self._hover_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        self._press_anim = QPropertyAnimation(self, b"press_progress")
+        self._press_anim.setDuration(100)
+        self._press_anim.setEasingCurve(QEasingCurve.OutQuad)
+
+        self._shadow_effect = QGraphicsDropShadowEffect(self)
+        self._shadow_effect.setBlurRadius(0)
+        self._shadow_effect.setOffset(0, 0)
+        self._shadow_effect.setColor(QColor(0, 120, 215, 0))
+        self.setGraphicsEffect(self._shadow_effect)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -45,9 +55,8 @@ class ThemeCard(QFrame):
         self.preview = QLabel()
         self.preview.setAlignment(Qt.AlignCenter)
         self.preview.setMinimumSize(200, 140)
-        self.preview.setStyleSheet("background: #1a1a1a; border-radius: 8px 8px 0 0;")
+        layout.addWidget(self.preview)
 
-        self._card_pixmap = QPixmap()
         loaded = False
         if bg_path and os.path.exists(bg_path):
             self._card_pixmap = QPixmap(bg_path)
@@ -57,17 +66,99 @@ class ThemeCard(QFrame):
                 loaded = True
         if not loaded:
             self.preview.setText("No Preview")
-            self.preview.setStyleSheet("color: #888; background: #1a1a1a; border-radius: 8px 8px 0 0; font-size: 13px;")
-
-        layout.addWidget(self.preview)
+            self.preview.setStyleSheet("color: #888; background: #1a1a1a; font-size: 13px;")
 
         name_label = QLabel(theme_name)
         name_label.setAlignment(Qt.AlignCenter)
-        name_label.setStyleSheet("color: #ddd; font-size: 14px; font-weight: bold; padding: 8px;")
+        name_label.setStyleSheet("color: #ddd; font-size: 14px; font-weight: bold; padding: 8px; background: #2a2a2a;")
         layout.addWidget(name_label)
 
+        self._update_style()
+
+    def _get_hover_progress(self):
+        return self._hover_progress
+
+    def _set_hover_progress(self, v):
+        self._hover_progress = v
+        self._update_style()
+
+    hover_progress = Property(float, _get_hover_progress, _set_hover_progress)
+
+    def _get_press_progress(self):
+        return self._press_progress
+
+    def _set_press_progress(self, v):
+        self._press_progress = v
+        self._update_style()
+
+    press_progress = Property(float, _get_press_progress, _set_press_progress)
+
+    def _update_style(self):
+        hp = self._hover_progress
+        pp = self._press_progress
+
+        bg_r = 42 + int(10 * hp)
+        bg_g = 42 + int(10 * hp)
+        bg_b = 42 + int(10 * hp)
+
+        border_r = 58 + int(40 * hp)
+        border_g = 58 + int(40 * hp)
+        border_b = 58 + int(120 * hp)
+
+        shadow_blur = int(24 * hp)
+        shadow_alpha = int(120 * hp)
+
+        self.setStyleSheet(f"""
+            ThemeCard {{
+                background: rgb({bg_r}, {bg_g}, {bg_b});
+                border: 2px solid rgb({border_r}, {border_g}, {border_b});
+                border-radius: 10px;
+            }}
+        """)
+
+        self._shadow_effect.setBlurRadius(shadow_blur)
+        self._shadow_effect.setOffset(0, int(4 * hp))
+        self._shadow_effect.setColor(QColor(0, 120, 215, shadow_alpha))
+
+        border_width = int(2 * hp)
+        border_alpha = int(180 * hp)
+        self.preview.setStyleSheet(f"""
+            background: #1a1a1a; 
+            border-radius: 8px 8px 0 0;
+            border-bottom: {border_width}px solid rgba(0, 120, 215, {border_alpha});
+        """)
+
+    def enterEvent(self, event):
+        self._hover_anim.stop()
+        self._hover_anim.setStartValue(self._hover_progress)
+        self._hover_anim.setEndValue(1.0)
+        self._hover_anim.start()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hover_anim.stop()
+        self._hover_anim.setStartValue(self._hover_progress)
+        self._hover_anim.setEndValue(0.0)
+        self._hover_anim.start()
+        super().leaveEvent(event)
+
     def mousePressEvent(self, event):
-        self.clicked.emit(self.theme_name)
+        if event.button() == Qt.LeftButton:
+            self._press_anim.stop()
+            self._press_anim.setStartValue(self._press_progress)
+            self._press_anim.setEndValue(1.0)
+            self._press_anim.start()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._press_anim.stop()
+            self._press_anim.setStartValue(self._press_progress)
+            self._press_anim.setEndValue(0.0)
+            self._press_anim.start()
+            if self.rect().contains(event.position().toPoint()):
+                self.clicked.emit(self.theme_name)
+        super().mouseReleaseEvent(event)
 
 
 class ThemeListPage(QWidget):
@@ -280,7 +371,21 @@ class SettingWidget(QFrame):
         self.key = opt["key"]
         self.enabled = True
         self.value_widget = None
+        self._expanded = False
+        self._content_height = 0
+        self._anim = QPropertyAnimation(self, b"content_height")
+        self._anim.setDuration(200)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
         self.setup_ui()
+
+    def _get_content_height(self):
+        return self._content_height
+
+    def _set_content_height(self, h):
+        self._content_height = h
+        self._content_widget.setFixedHeight(int(h))
+
+    content_height = Property(int, _get_content_height, _set_content_height)
 
     def setup_ui(self):
         self.setStyleSheet("""
@@ -292,8 +397,9 @@ class SettingWidget(QFrame):
             }
         """)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
+        self._main_layout = QVBoxLayout(self)
+        self._main_layout.setContentsMargins(10, 8, 10, 8)
+        self._main_layout.setSpacing(4)
 
         header = QHBoxLayout()
         self.checkbox = QCheckBox()
@@ -312,19 +418,51 @@ class SettingWidget(QFrame):
         desc.setStyleSheet("color: #777; font-size: 11px;")
         desc.setWordWrap(True)
 
-        layout.addLayout(header)
-        layout.addWidget(desc)
+        self._main_layout.addLayout(header)
+        self._main_layout.addWidget(desc)
 
-        val_layout = QHBoxLayout()
-        self._create_value_widget(val_layout)
-        layout.addLayout(val_layout)
+        self._content_widget = QWidget()
+        self._content_widget.setFixedHeight(0)
+        self._content_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        content_layout = QHBoxLayout(self._content_widget)
+        content_layout.setContentsMargins(0, 4, 0, 0)
+        self._create_value_widget(content_layout)
 
+        self._main_layout.addWidget(self._content_widget)
+
+        self._expanded = self.checkbox.isChecked()
+        if self._expanded:
+            self._content_widget.setFixedHeight(self._content_widget.sizeHint().height())
         self._update_enabled()
 
-    def _on_value_change(self):
-        if self.checkbox.isChecked():
+    def _on_toggle(self, checked):
+        self._expanded = checked
+        self._update_enabled()
+        if checked:
             self.theme.settings[self.key] = self._get_value()
+        elif self.key in self.theme.settings:
+            del self.theme.settings[self.key]
+        self._animate_expand()
         self.changed.emit()
+
+    def _animate_expand(self):
+        target = self._content_widget.sizeHint().height() if self._expanded else 0
+        self._anim.stop()
+        self._anim.setStartValue(self._content_height)
+        self._anim.setEndValue(target)
+        self._anim.start()
+
+    def _update_enabled(self):
+        enabled = self.checkbox.isChecked()
+        if self.value_widget is None:
+            return
+        self.value_widget.setEnabled(enabled)
+        if self.browse_btn:
+            self.browse_btn.setEnabled(enabled)
+        if isinstance(self.value_widget, QLineEdit):
+            self.value_widget.setStyleSheet(
+                f"background: {'#333' if enabled else '#222'}; color: {'#ccc' if enabled else '#555'}; border: 1px solid {'#444' if enabled else '#333'}; border-radius: 4px; padding: 4px;"
+            )
 
     def _create_value_widget(self, layout):
         opt = self.opt
@@ -373,6 +511,11 @@ class SettingWidget(QFrame):
             self.value_widget.textChanged.connect(self._on_value_change)
             layout.addWidget(self.value_widget)
 
+    def _on_value_change(self):
+        if self.checkbox.isChecked():
+            self.theme.settings[self.key] = self._get_value()
+        self.changed.emit()
+
     def _browse_file(self):
         subdir = self.opt.get("subdir", "")
         start_dir = self.theme.path
@@ -390,26 +533,6 @@ class SettingWidget(QFrame):
             rel = os.path.relpath(path, app_root)
             self.value_widget.setText(rel)
             self.changed.emit()
-
-    def _on_toggle(self, checked):
-        self._update_enabled()
-        if checked:
-            self.theme.settings[self.key] = self._get_value()
-        elif self.key in self.theme.settings:
-            del self.theme.settings[self.key]
-        self.changed.emit()
-
-    def _update_enabled(self):
-        enabled = self.checkbox.isChecked()
-        if self.value_widget is None:
-            return
-        self.value_widget.setEnabled(enabled)
-        if self.browse_btn:
-            self.browse_btn.setEnabled(enabled)
-        if isinstance(self.value_widget, QLineEdit):
-            self.value_widget.setStyleSheet(
-                f"background: {'#333' if enabled else '#222'}; color: {'#ccc' if enabled else '#555'}; border: 1px solid {'#444' if enabled else '#333'}; border-radius: 4px; padding: 4px;"
-            )
 
     def _get_value(self):
         if self.value_widget is None:
@@ -949,75 +1072,77 @@ class EditorPage(QWidget):
                 font-size: 13px;
                 font-weight: bold;
                 border: 1px solid #3a3a3a;
-                border-radius: 6px;
-                margin-top: 10px;
-                padding-top: 14px;
+                border-radius: 8px;
+                margin-top: 12px;
+                padding-top: 16px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 8px;
-                padding: 0 4px;
+                left: 10px;
+                padding: 0 6px;
+                color: #0078d7;
             }
         """)
         resources_layout = QVBoxLayout(resources_group)
-        resources_layout.setContentsMargins(6, 4, 6, 4)
-        resources_layout.setSpacing(4)
+        resources_layout.setContentsMargins(8, 8, 8, 8)
+        resources_layout.setSpacing(8)
 
         self.res_cards = {}
-        for key in ["banner"]:
-            card = ImageResourceCard("Background", key, None, "image")
-            card.changed.connect(lambda: self._on_resource_change())
-            card.enable_cb.toggled.connect(lambda checked, k=key: self._sync_setting_widget(k))
-            card.path_edit.textChanged.connect(lambda text, k=key: self._sync_setting_widget(k))
-            self.res_cards[key] = card
-            resources_layout.addWidget(card)
-
-        for key in ["selection_big"]:
-            card = ImageResourceCard("Selection Big", key, None, "image")
-            card.changed.connect(lambda: self._on_resource_change())
-            card.enable_cb.toggled.connect(lambda checked, k=key: self._sync_setting_widget(k))
-            card.path_edit.textChanged.connect(lambda text, k=key: self._sync_setting_widget(k))
-            self.res_cards[key] = card
-            resources_layout.addWidget(card)
-
-        for key in ["selection_small"]:
-            card = ImageResourceCard("Selection Small", key, None, "image")
-            card.changed.connect(lambda: self._on_resource_change())
+        for key, label in [("banner", "Background"), ("selection_big", "Selection Big"), ("selection_small", "Selection Small")]:
+            card = ImageResourceCard(label, key, None, "image")
+            card.changed.connect(self._on_resource_change)
             card.enable_cb.toggled.connect(lambda checked, k=key: self._sync_setting_widget(k))
             card.path_edit.textChanged.connect(lambda text, k=key: self._sync_setting_widget(k))
             self.res_cards[key] = card
             resources_layout.addWidget(card)
 
         self.icon_manager = IconManagerPanel(None)
-        self.icon_manager.changed.connect(lambda: self._on_resource_change())
+        self.icon_manager.changed.connect(self._on_resource_change)
         resources_layout.addWidget(self.icon_manager)
 
-        right_layout.addWidget(resources_group)
+        # Scroll area for resources so it doesn't get squished
+        resources_scroll = QScrollArea()
+        resources_scroll.setWidgetResizable(True)
+        resources_scroll.setFrameShape(QFrame.NoFrame)
+        resources_scroll.setWidget(resources_group)
+        resources_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        resources_scroll.setMinimumHeight(200)
 
-        preview_group = QGroupBox("Preview")
+        right_layout.addWidget(resources_scroll)
+
+        preview_group = QGroupBox("Live Preview")
         preview_group.setStyleSheet("""
             QGroupBox {
                 color: #aaa;
                 font-size: 13px;
                 font-weight: bold;
                 border: 1px solid #3a3a3a;
-                border-radius: 6px;
-                margin-top: 10px;
-                padding-top: 14px;
+                border-radius: 8px;
+                margin-top: 12px;
+                padding-top: 16px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 8px;
-                padding: 0 4px;
+                left: 10px;
+                padding: 0 6px;
+                color: #0078d7;
             }
         """)
         preview_layout = QVBoxLayout(preview_group)
         preview_layout.setContentsMargins(4, 4, 4, 4)
 
         self.preview = REFIndPreview()
-        self.preview.setStyleSheet("background: #111; border-radius: 4px;")
+        self.preview.setMinimumSize(560, 400)
+        self.preview.setStyleSheet("""
+            REFIndPreview {
+                background: #111;
+                border-radius: 8px;
+                border: 1px solid #2a2a2a;
+            }
+        """)
         preview_layout.addWidget(self.preview)
-        right_layout.addWidget(preview_group)
+
+        right_layout.addWidget(preview_group, 1)  # Stretch factor 1 = takes remaining space
 
         hsplitter.addWidget(right_panel)
         hsplitter.setSizes([400, 600])
@@ -1175,27 +1300,147 @@ class MainWindow(QMainWindow):
             QScrollBar:vertical {
                 background: #252525;
                 width: 8px;
+                margin: 0;
             }
             QScrollBar::handle:vertical {
-                background: #555;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #555, stop:1 #666);
                 border-radius: 4px;
                 min-height: 30px;
+                margin: 2px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0078d7, stop:1 #0086f0);
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0;
+            }
+            QScrollBar:horizontal {
+                background: #252525;
+                height: 8px;
+            }
+            QScrollBar::handle:horizontal {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #555, stop:1 #666);
+                border-radius: 4px;
+                min-width: 30px;
+                margin: 2px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0078d7, stop:1 #0086f0);
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0;
             }
             QInputDialog {
                 background: #2a2a2a;
                 color: #ddd;
             }
+            QMessageBox {
+                background: #2a2a2a;
+                color: #ddd;
+            }
+            QMessageBox QPushButton {
+                background: #0078d7;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 16px;
+                min-width: 80px;
+            }
+            QMessageBox QPushButton:hover { background: #0086f0; }
+            QToolTip {
+                background: #2a2a2a;
+                color: #ddd;
+                border: 1px solid #444;
+                border-radius: 4px;
+                padding: 4px 8px;
+            }
+            QComboBox {
+                background: #222;
+                color: #ccc;
+                border: 1px solid #444;
+                border-radius: 4px;
+                padding: 4px 8px;
+            }
+            QComboBox:hover { border: 1px solid #0078d7; }
+            QComboBox::drop-down { border: none; width: 20px; }
+            QComboBox QAbstractItemView {
+                background: #2a2a2a;
+                color: #ccc;
+                selection-background-color: #0078d7;
+                border: 1px solid #555;
+                outline: none;
+            }
+            QSpinBox {
+                background: #222;
+                color: #ccc;
+                border: 1px solid #444;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QSpinBox:hover { border: 1px solid #0078d7; }
+            QSpinBox::up-button, QSpinBox::down-button {
+                background: #3a3a3a;
+                border: none;
+                width: 16px;
+            }
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+                background: #4a4a4a;
+            }
+            QLineEdit {
+                background: #222;
+                color: #ccc;
+                border: 1px solid #444;
+                border-radius: 4px;
+                padding: 4px 8px;
+            }
+            QLineEdit:focus { border: 1px solid #0078d7; }
+            QCheckBox { color: #ccc; spacing: 6px; }
+            QCheckBox::indicator {
+                width: 16px; height: 16px;
+                border: 1px solid #666;
+                border-radius: 3px;
+                background: #222;
+            }
+            QCheckBox::indicator:checked {
+                border: 1px solid #0078d7;
+                background: #0078d7;
+                image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iMTIiIHZpZXdCb3g9IjAgMCAxMiAxMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTMgNUw1IDdMOSAzIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8L3N2Zz4K);
+            }
+            QGroupBox {
+                border: 1px solid #3a3a3a;
+                border-radius: 8px;
+                margin-top: 14px;
+                padding-top: 18px;
+                color: #aaa;
+                font-weight: bold;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 6px;
+                color: #0078d7;
+            }
+            QPushButton {
+                background: #3a3a3a;
+                color: #ddd;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 13px;
+            }
+            QPushButton:hover { background: #4a4a4a; }
+            QPushButton:pressed { background: #2a2a2a; }
+            QPushButton:disabled { background: #2a2a2a; color: #666; }
         """)
 
         central = QWidget()
         self.setCentralWidget(central)
 
         self.stack = QStackedWidget(central)
+        self.stack.setStyleSheet("background: transparent;")
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         layout.addWidget(self.stack)
 
         self.theme_list = ThemeListPage(
@@ -1208,17 +1453,32 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.editor)
         self.stack.setCurrentWidget(self.theme_list)
 
+        self._status_label = QLabel("Ready")
+        self._status_label.setStyleSheet("color: #888; font-size: 11px; padding: 4px 12px;")
+        self.statusBar().addPermanentWidget(self._status_label)
+        self.statusBar().setStyleSheet("background: #1a1a1a; border-top: 1px solid #2a2a2a; color: #888;")
+
+    def _set_status(self, text):
+        self._status_label.setText(text)
+
+    def _switch_page(self, target_widget):
+        if self.stack.currentWidget() != target_widget:
+            self.stack.setCurrentWidget(target_widget)
+
     def showEvent(self, event):
         super().showEvent(event)
         self.theme_list.refresh()
+        self._set_status("Ready")
 
     def _open_theme(self, theme_name):
+        self._set_status(f"Loading theme: {theme_name}...")
         themes_dir = get_themes_dir()
         theme_path = os.path.join(themes_dir, theme_name)
         if os.path.isdir(theme_path):
             theme = Theme(theme_path)
             self.editor.load_theme(theme)
-            self.stack.setCurrentWidget(self.editor)
+            self._switch_page(self.editor)
+            self._set_status(f"Editing: {theme_name}")
 
     def _create_theme(self):
         name, ok = QInputDialog.getText(self, "Create Theme", "Theme name:")
@@ -1231,5 +1491,6 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Error", f"Theme '{name}' already exists!")
 
     def _go_back(self):
-        self.stack.setCurrentWidget(self.theme_list)
+        self._switch_page(self.theme_list)
+        self._set_status("Ready")
         self.theme_list.refresh()
