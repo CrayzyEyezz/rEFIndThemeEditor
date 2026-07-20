@@ -2,7 +2,8 @@ This project was made to simplify making and customizing themes for [rEFInd](htt
 
 it started out as a simple previewer since i got annoyed of rebooting each time i wanted to see what it looked like, but i decided screw it im just going to add every config option aswell and make the themes fully buildable in a gui.
 
-<img width="1373" height="1250" alt="image" src="https://github.com/user-attachments/assets/e96c358e-76d8-4a03-9a59-7f3b313496d5" />
+<img width="1259" height="1047" alt="image" src="https://github.com/user-attachments/assets/cd74c1d2-4a00-48f8-b75a-be031232e7c9" />
+
 
 Showcase/Tutorial
 https://www.youtube.com/watch?v=reH_1cvkUkc
